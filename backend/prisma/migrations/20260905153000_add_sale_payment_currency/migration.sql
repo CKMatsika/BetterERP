@@ -1,0 +1,3 @@
+ALTER TABLE "SalePayment" ADD COLUMN "currencyAmount" DECIMAL(18,4);
+ALTER TABLE "SalePayment" ADD COLUMN "currency" TEXT NOT NULL DEFAULT 'USD';
+ALTER TABLE "SalePayment" ADD COLUMN "exchangeRate" DECIMAL(18,6) NOT NULL DEFAULT 1;

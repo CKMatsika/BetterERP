@@ -30,6 +30,14 @@ export interface Warehouse {
   isDefault?: boolean;
 }
 
+export interface Department {
+  id: string;
+  code: string;
+  name: string;
+  defaultMarkup?: string | number | null;
+  defaultGp?: string | number | null;
+}
+
 export interface Product {
   id: string;
   sku: string;
@@ -41,6 +49,12 @@ export interface Product {
   retailPrice?: string | number | null;
   costPrice?: string | number | null;
   reorderLevel?: string | number | null;
+  isPosFeatured?: boolean;
+  posColor?: string | null;
+  departmentId?: string | null;
+  department?: Department | null;
+  markup?: string | number | null;
+  gp?: string | number | null;
 }
 
 export interface Customer {

@@ -49,6 +49,11 @@ export default function Pos() {
     placeholderData: (prev) => prev,
   });
 
+  const featuredQ = useQuery({
+    queryKey: ["product", "featured"],
+    queryFn: () => api.get<{ items: Product[] }>("/api/products/search", { q: "", limit: 20 }),
+  });
+
   const openShift = useMutation({
     mutationFn: (body: { openingFloat: number; terminal?: string }) => api.post<Shift>("/api/misc/pos-shifts/open", body),
     onSuccess: () => {
@@ -172,8 +177,29 @@ export default function Pos() {
             placeholder="Search by name, SKU or barcode… (min 2 characters)"
           />
         </form>
-        {search.length < 2 ? (
+        {search.length > 0 && search.length < 2 ? (
           <EmptyState text="Type at least 2 characters to search products." />
+        ) : search.length === 0 ? (
+          featuredQ.isLoading ? (
+            <Spinner />
+          ) : featuredQ.data?.items.length === 0 ? (
+            <EmptyState text="No featured products set up yet. Managers can feature products from the product settings." />
+          ) : (
+            <div className="product-grid featured-grid">
+              {featuredQ.data!.items.map((p) => (
+                <button
+                  key={p.id}
+                  className="product-tile featured-tile"
+                  style={p.posColor ? { backgroundColor: p.posColor } : undefined}
+                  onClick={() => addProduct(p)}
+                >
+                  <div className="p-name">{p.name}</div>
+                  <div className="p-sku">{p.sku}</div>
+                  <div className="p-price">{fmtMoney(numberValue(p.sellingPrice) || numberValue(p.retailPrice))}</div>
+                </button>
+              ))}
+            </div>
+          )
         ) : searchQ.isLoading ? (
           <Spinner />
         ) : searchQ.data?.items.length === 0 ? (

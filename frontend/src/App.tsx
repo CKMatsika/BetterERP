@@ -11,6 +11,9 @@ import Products from "./pages/Products";
 import Stock from "./pages/Stock";
 import Adjustments from "./pages/Adjustments";
 import Transfers from "./pages/Transfers";
+import Blocktest from "./pages/Blocktest";
+import StockCounts from "./pages/StockCounts";
+import ProductionRuns from "./pages/ProductionRuns";
 import PurchaseOrders from "./pages/PurchaseOrders";
 import GoodsReceipts from "./pages/GoodsReceipts";
 import SupplierInvoices from "./pages/SupplierInvoices";
@@ -62,8 +65,11 @@ function App() {
         <Route path="/customers" element={<Shield perm="customer.view"><Customers /></Shield>} />
         <Route path="/inventory/products" element={<Shield perm="product.view"><Products /></Shield>} />
         <Route path="/inventory/stock" element={<Shield perm="inventory.view"><Stock /></Shield>} />
+        <Route path="/inventory/counts" element={<Shield perm="inventory.count"><StockCounts /></Shield>} />
         <Route path="/inventory/adjustments" element={<Shield perm="inventory.adjust"><Adjustments /></Shield>} />
         <Route path="/inventory/transfers" element={<Shield perm="transfer.view"><Transfers /></Shield>} />
+        <Route path="/inventory/blocktest" element={<Shield perm="product.view"><Blocktest /></Shield>} />
+        <Route path="/inventory/production" element={<Shield perm="product.view"><ProductionRuns /></Shield>} />
         <Route path="/purchasing/orders" element={<Shield perm="purchase.view"><PurchaseOrders /></Shield>} />
         <Route path="/purchasing/suppliers" element={<Shield perm="supplier.view"><Suppliers /></Shield>} />
         <Route path="/purchasing/receipts" element={<Shield perm="purchase.view"><GoodsReceipts /></Shield>} />

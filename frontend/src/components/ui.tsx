@@ -181,3 +181,17 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
     </div>
   );
 }
+
+export function fmtMoney(val: number | string | null | undefined) {
+  if (val == null) return "—";
+  const num = typeof val === "string" ? parseFloat(val) : val;
+  if (isNaN(num)) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(num);
+}
+
+export function fmtQty(val: number | string | null | undefined) {
+  if (val == null) return "—";
+  const num = typeof val === "string" ? parseFloat(val) : val;
+  if (isNaN(num)) return "—";
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(num);
+}

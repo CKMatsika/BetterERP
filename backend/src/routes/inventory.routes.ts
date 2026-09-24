@@ -467,6 +467,198 @@ router.get(
   })
 );
 
+// ===== BLOCKTESTS =====
+const blocktestSchema = z.object({
+  branchId: z.string().optional(),
+  warehouseId: z.string().optional(),
+  rawProductId: z.string(),
+  carcassType: z.string(),
+  rawWeight: z.coerce.number().nonnegative(),
+  rawCost: z.coerce.number().nonnegative(),
+  totalRevenue: z.coerce.number().nonnegative(),
+  gpPerc: z.coerce.number(),
+  markupPerc: z.coerce.number(),
+  lines: z.array(z.object({
+    productId: z.string().optional().nullable(),
+    cutName: z.string(),
+    yieldPerc: z.coerce.number(),
+    estWeight: z.coerce.number(),
+    estCost: z.coerce.number(),
+    sellingPrice: z.coerce.number(),
+    expectedRevenue: z.coerce.number(),
+    gpPerc: z.coerce.number(),
+  }))
+});
+
+router.post(
+  "/blocktests",
+  requirePermission("inventory.adjust"),
+  validateBody(blocktestSchema),
+  asyncHandler(async (req, res) => {
+    const companyId = req.user!.companyId;
+    const branchId = req.body.branchId ?? req.user!.branchId!;
+    
+    return prisma.$transaction(async (tx) => {
+      // Find default warehouse if none specified
+      let warehouseId = req.body.warehouseId;
+      if (!warehouseId) {
+        const wh = await tx.warehouse.findFirst({ where: { branchId, status: "ACTIVE" }});
+        if (!wh) throw ApiError.badRequest("No active warehouse found for branch");
+        warehouseId = wh.id;
+      }
+      
+      const reference = await nextReference({ companyId, branchId, docType: "STOCK_ADJUSTMENT" });
+      const postingAccounts = await getPostingAccounts(tx as any, companyId, branchId);
+      
+      const blocktest = await tx.blocktest.create({
+        data: {
+          companyId,
+          branchId,
+          warehouseId,
+          reference: `BT-${reference}`,
+          status: "POSTED",
+          rawProductId: req.body.rawProductId,
+          carcassType: req.body.carcassType,
+          rawWeight: req.body.rawWeight,
+          rawCost: req.body.rawCost,
+          totalRevenue: req.body.totalRevenue,
+          gpPerc: req.body.gpPerc,
+          markupPerc: req.body.markupPerc,
+          createdById: req.user!.id,
+          postedAt: new Date(),
+          postedById: req.user!.id,
+        }
+      });
+      
+      const journalLines: any[] = [];
+      
+      // Deduct Raw Material
+      const rawProduct = await tx.product.findUnique({ where: { id: req.body.rawProductId }});
+      if (rawProduct) {
+        const movement = await recordStockMovement(tx as any, {
+          companyId,
+          branchId,
+          warehouseId,
+          productId: rawProduct.id,
+          type: "BLOCKTEST_RAW_CONSUMPTION",
+          quantity: d(-req.body.rawWeight),
+          unitCost: rawProduct.averageCost,
+          reference: blocktest.reference,
+          sourceType: "BLOCKTEST",
+          sourceId: blocktest.id,
+          userId: req.user!.id,
+          note: `Blocktest Raw Consumption`,
+        });
+        
+        const costVal = mul(req.body.rawWeight, movement.newAverageCost);
+        journalLines.push({
+          accountId: postingAccounts.stockWriteoffId, // WIP or COGS in production
+          debit: costVal,
+          description: `Blocktest Raw ${rawProduct.sku}`,
+        });
+        journalLines.push({
+          accountId: postingAccounts.inventoryId,
+          credit: costVal,
+          description: `Blocktest Stock Reduction ${rawProduct.sku}`,
+        });
+      }
+
+      // Add Lines
+      const linesData = [];
+      for (const l of req.body.lines) {
+        linesData.push({
+          blocktestId: blocktest.id,
+          productId: l.productId || null,
+          cutName: l.cutName,
+          yieldPerc: l.yieldPerc,
+          estWeight: l.estWeight,
+          estCost: l.estCost,
+          sellingPrice: l.sellingPrice,
+          expectedRevenue: l.expectedRevenue,
+          gpPerc: l.gpPerc,
+        });
+        
+        if (l.productId && l.estWeight > 0) {
+           const p = await tx.product.findUnique({ where: { id: l.productId }});
+           if (p) {
+              const unitCost = l.estWeight > 0 ? d(l.estCost).div(l.estWeight).toNumber() : 0;
+              const movement = await recordStockMovement(tx as any, {
+                companyId,
+                branchId,
+                warehouseId,
+                productId: p.id,
+                type: "BLOCKTEST_CUT_PRODUCTION",
+                quantity: d(l.estWeight),
+                unitCost: d(unitCost),
+                reference: blocktest.reference,
+                sourceType: "BLOCKTEST",
+                sourceId: blocktest.id,
+                userId: req.user!.id,
+                note: `Blocktest Production: ${l.cutName}`,
+              });
+              
+              journalLines.push({
+                accountId: postingAccounts.inventoryId,
+                debit: d(l.estCost),
+                description: `Blocktest Production ${p.sku}`,
+              });
+              journalLines.push({
+                accountId: postingAccounts.stockWriteoffId,
+                credit: d(l.estCost),
+                description: `Blocktest Production offset ${p.sku}`,
+              });
+           }
+        }
+      }
+      
+      await tx.blocktestLine.createMany({ data: linesData });
+      
+      if (journalLines.length > 0) {
+         await postJournal(tx as any, {
+            companyId,
+            branchId,
+            reference: `JE-${blocktest.reference}`,
+            description: `Blocktest conversion ${blocktest.reference}`,
+            entryType: "ADJUSTMENT",
+            sourceType: "BLOCKTEST",
+            sourceId: blocktest.id,
+            userId: req.user!.id,
+            skipReference: true,
+            lines: journalLines,
+         });
+      }
+
+      return { blocktest };
+    }).then((r) => res.status(201).json(r));
+  })
+);
+
+router.get(
+  "/blocktests",
+  requirePermission("inventory.view"),
+  asyncHandler(async (req, res) => {
+    const { page, pageSize, skip } = parsePagination(req.query);
+    const where: Prisma.BlocktestWhereInput = { companyId: req.user!.companyId };
+    const branchId = effectiveBranchId(req);
+    if (!req.user!.canViewAllBranches && branchId) where.branchId = branchId;
+    
+    const [total, items] = await Promise.all([
+      prisma.blocktest.count({ where }),
+      prisma.blocktest.findMany({
+        where,
+        include: {
+           rawProduct: { select: { id: true, name: true, sku: true }},
+           lines: { include: { product: { select: { id: true, name: true, sku: true } } } }
+        },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: pageSize,
+      }),
+    ]);
+    res.json({ items, total, page, pageSize });
+  })
+);
+
 // Reorder point check
 router.post(
   "/check-reorders",

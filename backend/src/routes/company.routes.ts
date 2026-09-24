@@ -66,7 +66,7 @@ router.get(
 router.post(
   "/departments",
   requirePermission("department.edit"),
-  validateBody(z.object({ code: z.string().min(1), name: z.string().min(1), description: z.string().optional().nullable() })),
+  validateBody(z.object({ code: z.string().min(1), name: z.string().min(1), description: z.string().optional().nullable(), defaultMarkup: z.coerce.number().optional().nullable(), defaultGp: z.coerce.number().optional().nullable() })),
   asyncHandler(async (req, res) => {
     const dept = await prisma.department.create({
       data: { companyId: req.user!.companyId, ...req.body },

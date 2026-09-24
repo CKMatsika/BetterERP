@@ -137,6 +137,243 @@ router.get(
   })
 );
 
+// ==================== BUTCHERY REPORTS ====================
+
+router.get(
+  "/butchery/department-trading",
+  requirePermission("report.view"),
+  asyncHandler(async (req, res) => {
+    const companyId = req.user!.companyId;
+    const branchId = effectiveBranchId(req);
+    const since = req.query.from as string ? new Date(req.query.from as string) : new Date(new Date().getFullYear(), 0, 1);
+    const to = req.query.to as string ? new Date(new Date(req.query.to as string).getTime() + 86400000 - 1) : new Date();
+
+    const groups = await prisma.saleLine.groupBy({
+      by: ["productId"],
+      where: {
+        sale: {
+          companyId,
+          status: { in: ["COMPLETED", "PARTIAL_RETURN"] },
+          saleDate: { gte: since, lte: to },
+          ...(!req.user!.canViewAllBranches && branchId ? { branchId } : {}),
+        },
+      },
+      _sum: { lineTotal: true, costPrice: true, quantity: true },
+    });
+    
+    const productIds = groups.map(g => g.productId).filter(Boolean) as string[];
+    const products = productIds.length > 0 ? await prisma.product.findMany({
+      where: { id: { in: productIds } },
+      include: { department: true }
+    }) : [];
+    
+    const productMap = new Map(products.map(p => [p.id, p]));
+    
+    const byDepartment = new Map<string, { name: string, revenue: any, cost: any, qty: any }>();
+    
+    groups.forEach(g => {
+      if (!g.productId) return;
+      const product = productMap.get(g.productId);
+      const deptName = product?.department?.name || "Unassigned";
+      
+      const current = byDepartment.get(deptName) || { name: deptName, revenue: d(0), cost: d(0), qty: d(0) };
+      current.revenue = current.revenue.plus(d(g._sum.lineTotal ?? 0));
+      // costPrice on saleLine is per unit, so total cost = costPrice * quantity
+      const totalCost = d(g._sum.costPrice ?? 0).mul(d(g._sum.quantity ?? 0));
+      current.cost = current.cost.plus(totalCost);
+      current.qty = current.qty.plus(d(g._sum.quantity ?? 0));
+      
+      byDepartment.set(deptName, current);
+    });
+
+    const rows = Array.from(byDepartment.values()).map(dept => {
+      const gp = dept.revenue.minus(dept.cost);
+      const gpPerc = dept.revenue.isZero() ? 0 : gp.div(dept.revenue).mul(100).toNumber();
+      return {
+        Department: dept.name,
+        "Items Sold": dept.qty.toNumber(),
+        Revenue: dept.revenue.toNumber(),
+        "COGS": dept.cost.toNumber(),
+        "Gross Profit": gp.toNumber(),
+        "GP %": gpPerc
+      };
+    });
+
+    if (req.query.format as string === "csv") return sendCsv(res, "department_trading", rows);
+    res.json({ items: rows });
+  })
+);
+
+router.get(
+  "/butchery/blocktest-reconciliation",
+  requirePermission("report.view"),
+  asyncHandler(async (req, res) => {
+    const companyId = req.user!.companyId;
+    const branchId = effectiveBranchId(req);
+    const where: Prisma.BlocktestWhereInput = { companyId, status: "POSTED" };
+    if (!req.user!.canViewAllBranches && branchId) where.branchId = branchId;
+    if (req.query.from as string || req.query.to as string) {
+      where.createdAt = {
+        gte: req.query.from as string ? new Date(req.query.from as string) : undefined,
+        lte: req.query.to as string ? new Date(new Date(req.query.to as string).getTime() + 86400000 - 1) : undefined,
+      };
+    }
+    
+    const blocktests = await prisma.blocktest.findMany({
+      where,
+      include: {
+        rawProduct: { select: { sku: true, name: true } },
+        lines: { include: { product: { select: { sku: true, name: true } } } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    
+    // For each blocktest, fetch sales of its produced products after the blocktest was posted
+    const rows = [];
+    for (const bt of blocktests) {
+      for (const line of bt.lines) {
+        if (!line.productId) continue;
+        
+        // Find sales of this product since blocktest was posted
+        const sales = await prisma.saleLine.aggregate({
+          where: {
+            productId: line.productId,
+            sale: {
+              companyId,
+              saleDate: { gte: bt.postedAt ?? bt.createdAt },
+              status: { in: ["COMPLETED", "PARTIAL_RETURN"] }
+            }
+          },
+          _sum: { quantity: true, lineTotal: true }
+        });
+        
+        rows.push({
+          "Blocktest Ref": bt.reference,
+          "Date Posted": (bt.postedAt || bt.createdAt).toISOString(),
+          "Raw Input": bt.rawProduct.name,
+          "Cut Product": line.product?.name ?? line.cutName,
+          "Est. Weight Yield": d(line.estWeight).toNumber(),
+          "Est. Revenue": d(line.expectedRevenue).toNumber(),
+          "Actual Sold Qty": d(sales._sum.quantity ?? 0).toNumber(),
+          "Actual Revenue": d(sales._sum.lineTotal ?? 0).toNumber(),
+          "Variance (Qty)": d(sales._sum.quantity ?? 0).minus(d(line.estWeight)).toNumber(),
+          "Variance (Rev)": d(sales._sum.lineTotal ?? 0).minus(d(line.expectedRevenue)).toNumber(),
+        });
+      }
+    }
+    
+    if (req.query.format as string === "csv") return sendCsv(res, "blocktest_reconciliation", rows);
+    res.json({ items: rows });
+  })
+);
+
+router.get(
+  "/butchery/low-gp-sales",
+  requirePermission("report.view"),
+  asyncHandler(async (req, res) => {
+    const companyId = req.user!.companyId;
+    const branchId = effectiveBranchId(req);
+    const since = req.query.from as string ? new Date(req.query.from as string) : new Date(new Date().getFullYear(), 0, 1);
+    const to = req.query.to as string ? new Date(new Date(req.query.to as string).getTime() + 86400000 - 1) : new Date();
+
+    const saleLines = await prisma.saleLine.findMany({
+      where: {
+        sale: {
+          companyId,
+          status: { in: ["COMPLETED", "PARTIAL_RETURN"] },
+          saleDate: { gte: since, lte: to },
+          ...(!req.user!.canViewAllBranches && branchId ? { branchId } : {}),
+        }
+      },
+      include: {
+        sale: { select: { reference: true, saleDate: true, branch: { select: { name: true } } } },
+        product: { select: { sku: true, name: true, gp: true, department: { select: { defaultGp: true } } } }
+      },
+      orderBy: { sale: { saleDate: 'desc' } }
+    });
+
+    const rows = [];
+    for (const line of saleLines) {
+      if (!line.product) continue;
+      
+      const unitPrice = d(line.unitPrice);
+      const costPrice = d(line.costPrice);
+      
+      if (unitPrice.isZero()) continue;
+
+      const actualGp = unitPrice.minus(costPrice);
+      const actualGpPerc = actualGp.div(unitPrice).mul(100).toNumber();
+      
+      // Expected GP is product gp, or department gp, or 20%
+      const expectedGpPerc = d(line.product.gp || line.product.department?.defaultGp || 20).toNumber();
+
+      if (actualGpPerc < expectedGpPerc) {
+        const expectedRevenue = costPrice.div(d(1).minus(d(expectedGpPerc).div(100)));
+        const lostRevenuePerUnit = expectedRevenue.minus(unitPrice);
+        const totalLost = lostRevenuePerUnit.mul(d(line.quantity));
+
+        rows.push({
+          "Date": line.sale.saleDate.toISOString(),
+          "Branch": line.sale.branch?.name || "HQ",
+          "Receipt": line.sale.reference,
+          "Product": line.product.name,
+          "Qty": d(line.quantity).toNumber(),
+          "Cost Price": costPrice.toNumber(),
+          "Selling Price": unitPrice.toNumber(),
+          "Actual GP %": Math.round(actualGpPerc * 100) / 100,
+          "Expected GP %": expectedGpPerc,
+          "Est. Lost Revenue": Math.round(totalLost.toNumber() * 100) / 100,
+        });
+      }
+    }
+
+    if (req.query.format as string === "csv") return sendCsv(res, "low_gp_sales", rows);
+    res.json({ items: rows });
+  })
+);
+
+router.get(
+  "/butchery/pricing-exceptions",
+  requirePermission("report.view"),
+  asyncHandler(async (req, res) => {
+    const companyId = req.user!.companyId;
+    const products = await prisma.product.findMany({
+      where: { companyId, status: "ACTIVE" },
+      include: { department: { select: { name: true, defaultGp: true } } }
+    });
+
+    const rows = [];
+    for (const p of products) {
+      const avgCost = d(p.averageCost || 0);
+      const sellPrice = d(p.sellingPrice || 0);
+      
+      if (avgCost.isZero() || sellPrice.isZero()) continue;
+
+      const actualGpPerc = sellPrice.minus(avgCost).div(sellPrice).mul(100).toNumber();
+      const expectedGpPerc = d(p.gp || p.department?.defaultGp || 20).toNumber();
+
+      if (actualGpPerc < expectedGpPerc) {
+        const suggestedPrice = avgCost.div(d(1).minus(d(expectedGpPerc).div(100)));
+        
+        rows.push({
+          "SKU": p.sku,
+          "Product": p.name,
+          "Department": p.department?.name || "None",
+          "Avg Cost": avgCost.toNumber(),
+          "Current Price": sellPrice.toNumber(),
+          "Current GP %": Math.round(actualGpPerc * 100) / 100,
+          "Target GP %": expectedGpPerc,
+          "Suggested Price": Math.round(suggestedPrice.toNumber() * 100) / 100,
+          "Action": actualGpPerc < 0 ? "URGENT: Trading below cost!" : "Review Pricing"
+        });
+      }
+    }
+
+    if (req.query.format as string === "csv") return sendCsv(res, "pricing_exceptions", rows);
+    res.json({ items: rows });
+  })
+);
+
 // ==================== SALES REPORTS ====================
 
 router.get(

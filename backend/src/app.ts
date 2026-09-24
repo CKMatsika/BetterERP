@@ -35,6 +35,7 @@ import fileRoutes from "./routes/file.routes";
 import auditRoutes from "./routes/audit.routes";
 import approvalRoutes from "./routes/approval.routes";
 import miscRoutes from "./routes/misc.routes";
+import productionRoutes from "./routes/production.routes";
 
 export function createApp() {
   const app = express();
@@ -102,6 +103,7 @@ export function createApp() {
   app.use("/api/audit", authenticate, auditRoutes);
   app.use("/api/approvals", authenticate, approvalRoutes);
   app.use("/api/misc", authenticate, miscRoutes);
+  app.use("/api/production", authenticate, productionRoutes);
 
   // 404
   app.use(notFoundHandler);

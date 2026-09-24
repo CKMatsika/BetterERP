@@ -16,6 +16,10 @@ const REPORTS: Array<{ group: string; name: string; path: string }> = [
   { group: "Accounting", name: "Aged receivables", path: "/api/reports/accounting/aged-recivables" },
   { group: "HR", name: "Headcount", path: "/api/reports/hr/headcount" },
   { group: "HR", name: "Attendance summary", path: "/api/reports/hr/attendance-summary" },
+  { group: "Butchery", name: "Blocktest vs Actual Sales", path: "/api/reports/butchery/blocktest-reconciliation" },
+  { group: "Butchery", name: "Department Trading Account", path: "/api/reports/butchery/department-trading" },
+  { group: "Butchery", name: "Low GP Sales Exceptions", path: "/api/reports/butchery/low-gp-sales" },
+  { group: "Butchery", name: "Pricing Actions & Margins", path: "/api/reports/butchery/pricing-exceptions" },
 ];
 
 export default function Reports() {

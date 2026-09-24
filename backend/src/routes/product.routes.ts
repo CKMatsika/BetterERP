@@ -17,6 +17,9 @@ const productSchema = z.object({
   barcode: z.string().optional().nullable(),
   name: z.string().min(1),
   description: z.string().optional().nullable(),
+  departmentId: z.string().optional().nullable(),
+  markup: z.coerce.number().optional().nullable(),
+  gp: z.coerce.number().optional().nullable(),
   categoryId: z.string().optional().nullable(),
   brandId: z.string().optional().nullable(),
   unitOfMeasureId: z.string().optional().nullable(),
@@ -46,6 +49,8 @@ const productSchema = z.object({
   width: z.coerce.number().optional().nullable(),
   height: z.coerce.number().optional().nullable(),
   allowNegative: z.boolean().optional(),
+  isPosFeatured: z.boolean().optional(),
+  posColor: z.string().optional().nullable(),
   status: z.enum(["ACTIVE", "INACTIVE", "ARCHIVED"]).optional(),
 });
 
@@ -152,6 +157,7 @@ router.get(
       ];
     }
     if (req.query.categoryId as string) where.categoryId = req.query.categoryId as string;
+    if (req.query.departmentId as string) where.departmentId = req.query.departmentId as string;
     if (req.query.brandId as string) where.brandId = req.query.brandId as string;
     if (req.query.status as string) where.status = req.query.status as any;
 
@@ -160,6 +166,7 @@ router.get(
       prisma.product.findMany({
         where,
         include: {
+          department: { select: { id: true, name: true } },
           category: { select: { id: true, name: true } },
           brand: { select: { id: true, name: true } },
           unitOfMeasure: { select: { id: true, code: true, name: true } },
@@ -211,6 +218,8 @@ router.get(
         { barcode: { contains: q, mode: "insensitive" } },
         { name: { contains: q, mode: "insensitive" } },
       ];
+    } else {
+      where.isPosFeatured = true;
     }
     const products = await prisma.product.findMany({
       where,
@@ -225,6 +234,8 @@ router.get(
         retailPrice: true,
         costPrice: true,
         type: true,
+        isPosFeatured: true,
+        posColor: true,
       },
     });
 
@@ -271,6 +282,7 @@ router.get(
     const product = await prisma.product.findUnique({
       where: { id: req.params.id as string },
       include: {
+        department: true,
         category: true,
         brand: true,
         unitOfMeasure: true,
@@ -315,6 +327,8 @@ router.post(
         ...req.body,
         costPrice: req.body.costPrice != null ? d(req.body.costPrice) : d(0),
         averageCost: d(0),
+        markup: req.body.markup != null ? d(req.body.markup) : null,
+        gp: req.body.gp != null ? d(req.body.gp) : null,
         sellingPrice: req.body.sellingPrice != null ? d(req.body.sellingPrice) : d(0),
         wholesalePrice: req.body.wholesalePrice != null ? d(req.body.wholesalePrice) : null,
         retailPrice: req.body.retailPrice != null ? d(req.body.retailPrice) : null,

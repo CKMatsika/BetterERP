@@ -32,8 +32,11 @@ const sections: NavSection[] = [
     items: [
       { label: "Products", to: "/inventory/products", perm: "product.view" },
       { label: "Stock on Hand", to: "/inventory/stock", perm: "inventory.view" },
+      { label: "Stock Take", to: "/inventory/counts", perm: "inventory.view" },
       { label: "Adjustments", to: "/inventory/adjustments", perm: "inventory.adjust" },
       { label: "Branch Transfers", to: "/inventory/transfers", perm: "transfer.view" },
+      { label: "Blocktest", to: "/inventory/blocktest", perm: "product.view" },
+      { label: "Production", to: "/inventory/production", perm: "product.view" },
     ],
   },
   {
@@ -82,8 +85,11 @@ const iconByLabel: Record<string, React.ReactNode> = {
   Customers: <Users size={16} />,
   Products: <Package size={16} />,
   "Stock on Hand": <Warehouse size={16} />,
+  "Stock Take": <ClipboardList size={16} />,
   Adjustments: <Boxes size={16} />,
   "Branch Transfers": <ArrowLeftRight size={16} />,
+  Blocktest: <Calculator size={16} />,
+  Production: <Boxes size={16} />,
   "Purchase Orders": <ClipboardList size={16} />,
   Suppliers: <Truck size={16} />,
   "Goods Receipts": <Truck size={16} />,

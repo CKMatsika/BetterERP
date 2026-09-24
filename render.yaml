@@ -18,9 +18,8 @@ services:
       - key: PORT
         value: 10000
 
-  - type: web
+  - type: static
     name: bettererp-frontend
-    env: static
     region: ohio
     rootDir: frontend
     buildCommand: npm install && npm run build

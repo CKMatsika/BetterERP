@@ -43,7 +43,9 @@ export default function Reports() {
 
   const download = async (path: string) => {
     const token = localStorage.getItem("bettererp_token");
-    const res = await fetch(enrich(path), { headers: { Authorization: `Bearer ${token}` } });
+    const baseUrl = import.meta.env.VITE_API_URL || "";
+    const fetchUrl = baseUrl ? `${baseUrl}${enrich(path)}` : enrich(path);
+    const res = await fetch(fetchUrl, { headers: { Authorization: `Bearer ${token}` } });
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

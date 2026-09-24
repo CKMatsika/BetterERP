@@ -54,22 +54,26 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
   get<T>(path: string, params?: Record<string, string | number | boolean | undefined | null>) {
-    const url = new URL(path, window.location.origin);
+    const baseUrl = import.meta.env.VITE_API_URL || window.location.origin;
+    const url = new URL(path, baseUrl);
     if (params) {
       for (const [k, v] of Object.entries(params)) {
         if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
       }
     }
-    return request<T>(`${url.pathname}${url.search}`);
+    return request<T>(import.meta.env.VITE_API_URL ? url.toString() : `${url.pathname}${url.search}`);
   },
   post<T>(path: string, body?: unknown) {
-    return request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
+    const baseUrl = import.meta.env.VITE_API_URL || "";
+    return request<T>(baseUrl ? `${baseUrl}${path}` : path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
   },
   put<T>(path: string, body?: unknown) {
-    return request<T>(path, { method: "PUT", body: body === undefined ? undefined : JSON.stringify(body) });
+    const baseUrl = import.meta.env.VITE_API_URL || "";
+    return request<T>(baseUrl ? `${baseUrl}${path}` : path, { method: "PUT", body: body === undefined ? undefined : JSON.stringify(body) });
   },
   del<T>(path: string) {
-    return request<T>(path, { method: "DELETE" });
+    const baseUrl = import.meta.env.VITE_API_URL || "";
+    return request<T>(baseUrl ? `${baseUrl}${path}` : path, { method: "DELETE" });
   },
 };
 
